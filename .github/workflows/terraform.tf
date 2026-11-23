@@ -1,0 +1,112 @@
+name: Terraform monrepo CI/CD
+
+on:
+  pull_request: 
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      directories: ${{ steps.changes.outputs.directories }}
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+    
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0 
+
+      - name: find changed directories 
+        id: changes 
+        run |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="HEAD~1"
+          fi
+
+          DIRS=$(bash scripts/detect-changed-dirs.sh "$BASE")
+
+          if [ -z "$DIRS" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "directories=[]" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            JSON=$(echo "$DIRS" | jq -R -s 'split("\n") | map(select(length > 0))')
+            echo "directories=$JSON" >> $GITHUB_OUTPUT
+          fi
+  
+  plan:
+    needs: detect 
+    if: needs.detect.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest 
+    strategy:
+      matrix:
+        directory: ${{ fromJson(needs.detect.outputs.directories) }}
+      fail-fast: false 
+    
+    steps:
+      - uses: actions/checkout$v4 
+
+      - uses: hashicorp/setup-terraform@v4 
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false 
+         
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: 
+          aws-region: us-east-1 
+ 
+
+      - name: terraform plan - ${{ matrix.directory }}
+        env:
+          TF_DIR: ${{ matrix.directory }}
+        run: |
+          cd "$TF_DIR" 
+          terraform init -no-color 
+          terraform plan -no-color -out=tfplan
+          terraform show -no-color tfplan > plan-output.tf 
+
+      - name: upload plan 
+        uses: actions/upload-artifacts@v4 
+        with: 
+          name: plan-${{ strategy.job-index }}
+          path:  |
+            ${{ matric.directory }}/tf-plan 
+            ${{ matrix.directory }}/plan-output.txt 
+        
+  apply:
+    needs: [detect, plan]
+    if: github.event_name == 'push' && needs.detect.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest 
+    strategy:
+      matrix: 
+        directory: ${{fromJson(needs.detect.outputs.directories) }}
+        max-parallel: 1
+
+    steps:
+      - uses: actions/checkout@v4 
+
+      - uses: hashicorp/setup-terraform@v4 
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false 
+         
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: 
+          aws-region: us-east-1 
+      
+      - name: Terraform Apply - ${{ matrix.directory }}
+        env:
+          TF_DIR: ${{ matrix.directory }}
+        run: |
+          cd "$TF_DIR"
+          terraform init -no-color
+          terraform apply -no-color -auto-approve
+      
+
+      
