@@ -34,7 +34,7 @@ jobs:
             echo "directories=[]" >> $GITHUB_OUTPUT
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            JSON=$(echo "$DIRS" | jq -R -s 'split("\n") | map(select(length > 0))') 
+            JSON=$(echo "$DIRS" | jq -R -s -c 'split("\n") | map(select(length > 0))') 
             echo "directories=$JSON" >> $GITHUB_OUTPUT
           fi
   
