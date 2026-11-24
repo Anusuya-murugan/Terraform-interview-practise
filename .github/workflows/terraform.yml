@@ -85,7 +85,7 @@ jobs:
     strategy:
       matrix: 
         directory: ${{fromJson(needs.detect.outputs.directories) }}
-        max-parallel: 1
+      max-parallel: 1
 
     steps:
       - uses: actions/checkout@v4 
